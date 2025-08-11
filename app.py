@@ -32,6 +32,7 @@ Endpoints:
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from google.cloud import vision
 import tempfile
 import os
 import io
@@ -48,6 +49,7 @@ import multiprocessing
 import traceback
 import aiohttp
 import base64
+import pickle
 from typing import Optional, List
 
 # ---------- Configuration ----------
@@ -56,6 +58,8 @@ API_PROXY_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6InNtcml0aS50dXJhbkBnbWFpbC5jb2
 # Set MODEL and any other settings your proxy accepts
 LLM_MODEL = "gpt-4o-mini"  # change if needed
 LLM_MAX_TOKENS = 1500
+
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "tds-data-analyst-a18de7bbb408.json"
 
 # Allowed modules and names for execution environment
 ALLOWED_MODULES = {
@@ -271,37 +275,59 @@ def execute_user_code(code: str, provided_env: dict = None, timeout: int = 150) 
     result_ns.update(exec_locals)
     return result_ns
 
+def _filter_pickleable(d):
+    safe_dict = {}
+    for k, v in d.items():
+        try:
+            pickle.dumps(v)
+            safe_dict[k] = v
+        except Exception:
+            pass  # Skip unpickleable objects
+    return safe_dict
+
 def _exec_retry_worker(code, queue):
     try:
         result = execute_user_code(code)
-        queue.put({"success": True, "result": result})
+        queue.put({"success": True, "result": _filter_pickleable(result)})
     except Exception:
         queue.put({"success": False, "error": traceback.format_exc()})
 
 
 async def get_image_description(image_bytes: bytes) -> str:
-    # (Fill in your API endpoint, key, and request details here)
-    api_url = "https://vision.googleapis.com/v1/images:annotate?key=AIzaSyC4iKaY-zwLslbeFJ8owyVHfz7eawZgXII"
+    client = vision.ImageAnnotatorClient()
 
     image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-    print(image_base64)
+    image = vision.Image(content=image_base64)
 
-    request_body = {
-        "requests": [{
-            "image": {"content": image_base64},
-            "features": [{"type": "LABEL_DETECTION", "maxResults": 5}]
-        }]
-    }
+    response = client.text_detection(image=image)
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(api_url, json=request_body) as resp:
-            resp_json = await resp.json()
-            print(resp.text)
-            # Extract a useful textual description from response, e.g. labels
-            labels = resp_json.get('responses', [{}])[0].get('labelAnnotations', [])
-            description = ", ".join([label['description'] for label in labels])
-            return description
+    if response.error.message:
+        return response.error.message
 
+    texts = response.text_annotations
+    if texts:
+        extracted_text = texts[0].description  # Full OCR text
+        return {"text": extracted_text}
+    else:
+        return {"text": ""}
+
+def get_csv_sample(csv_text, n=5):
+    try:
+        df_sample = pd.read_csv(io.StringIO(csv_text), nrows=n)
+        return df_sample.to_csv(index=False)
+    except Exception:
+        # fallback: just return first few lines of raw text
+        return "\n".join(csv_text.splitlines()[:n])
+
+def cleanup_files(filenames):
+    for fname in filenames:
+        try:
+            os.remove(fname)
+            print(f"Deleted {fname}")
+        except FileNotFoundError:
+            print(f"File {fname} not found for deletion")
+        except Exception as e:
+            print(f"Error deleting {fname}: {e}")
 
 # ---------- Prompt templates ----------
 
@@ -311,6 +337,7 @@ You are a helpful assistant that writes Python code. The user will provide a sma
 - one or more questions that need data
 - context describing what data sources (URLs, CSV/Parquet files, SQL endpoints) may
   be needed
+- all csv files are stored locally in the same folder. use read_csv('file_path') to save to df ONLY IF required. Avoid using Stringio.
 
 Write a Python script that loads/collects the required data into a single pandas
 DataFrame named `df` (a pandas.DataFrame). The environment that will run the code
@@ -337,12 +364,16 @@ pandas DataFrame named `df`. The runtime will provide `pd` and `duckdb` and has
 already loaded a dataframe `df` (containing a sample of the user's data or the
 entire dataset). The original user questions and any additional context are below.
 
-Write Python code that computes a variable called `answers` (either a dict or a
-string serializable to JSON) that contains the answers to the questions.
+Write Python code that computes a variable called `answers` (AS a dict ONLY) that contains the answers to the questions.
 Guidelines:
 - Use only pandas and duckdb for data processing.
 - you can use sklearn for data processing if needed.
 - STRICTLY Use pandas string replacement with a regex (.str.replace(r'[^\d.]', '', regex=True), that strips everything except digits and decimal points, and then convert to numeric to avoid errors.
+- When filtering and finding a max/min row (e.g., `idxmax`), **filter first, then calculate**:
+    - Store filtered results in a variable before applying `idxmax` or `iloc`.
+    - Check `if not df.empty:` before indexing to avoid runtime errors.
+    - Do not reuse an index from one DataFrame on another.
+- Avoid chained indexing pitfalls — always work on a variable holding the filtered DataFrame.
 - The code should not print; it should set `answers` and then finish.
 - If numerical outputs are returned, ensure types are simple (int, float, str).
 - Respond with ONLY the Python code.
@@ -369,16 +400,19 @@ retrydf_prompt = """
 
 @app.post('/api', response_model=AnalyzeResponse)
 async def analyze(request: Request, text: str = Form(None)):
+    print('api called')
     attachments = {}
     text_files = {}
+    text_files_sample= {}
     question_text = None
     image_descriptions = {}
+    saved_files = []
 
     form = await request.form()
     print(form)
     for form_key, form_value in form.multi_items():
         print('file present')
-        print('form key',form_value)
+        print('form key',form_key)
         print('instance', isinstance(form_value, UploadFile))
         if hasattr(form_value, "filename"):
             print('files present', form_value)
@@ -390,7 +424,10 @@ async def analyze(request: Request, text: str = Form(None)):
                 if form_value.filename.lower().endswith(".txt"):
                     question_text = text_content
                 else:
-                    text_files[form_value.filename] = text_content
+                    text_files[form_key] = text_content
+                    with open(form_key, "wb") as f:
+                        f.write(content)
+                        saved_files.append(form_key)
             except UnicodeDecodeError:
                 attachments[form_value.filename] = content
 
@@ -398,34 +435,15 @@ async def analyze(request: Request, text: str = Form(None)):
                     description = await get_image_description(content)
                     image_descriptions[form_value.filename] = description
 
-    print("question_text:", question_text)
+    for fname, content in text_files.items():
+        if fname.endswith(".csv"):
+            text_files_sample[fname] = get_csv_sample(content, n=5)
+
+    print('question:', question_text)
+
     print("text_files:", list(text_files.keys()))
     print("attachments:", list(attachments.keys()))
-    print(image_descriptions)
-    # for f in files:
-    #     print(f.filename)
-    #     content = await f.read()
-    #     # Detect text vs binary
-    #     try:
-    #         text_content = content.decode("utf-8")
-    #         if f.filename.lower().endswith(".txt"):
-    #             question_text = text_content
-    #         else:
-    #             text_files[f.filename] = text_content
-    #     except UnicodeDecodeError:
-    #         # Store binary files as bytes
-    #         attachments[f.filename] = content 
-
-    # if file is None and not text:
-    #     raise HTTPException(status_code=400, detail="Provide either a file or text form field")
-
-    # if file is not None:
-    #     content = await file.read()
-    #     question_text = content.decode('utf-8', errors='ignore')
-    # else:
-    #     question_text = text
-
-    
+    print(image_descriptions)   
     
 
     # 1) Ask LLM for data-fetch code
@@ -433,25 +451,24 @@ async def analyze(request: Request, text: str = Form(None)):
     fetch_prompt = f"""
         Instructions: {fetch_prompt}
 
-        Additional text file contents:
-        { {fname: text_files[fname] for fname in text_files} }
-
+        Additional text file content sample:
+        { {fname: text_files_sample[fname] for fname in text_files_sample} }
 
         Image descriptions:
         {image_descriptions}
 
     """
     print('fetching: ' , fetch_prompt)
-    print('question:',question_text)
     try:
         fetch_code = call_llm(fetch_prompt, question_text)
     except Exception as e:
+        cleanup_files(saved_files)
         return AnalyzeResponse(success=False, answers=None, error=f"LLM data-fetch failed: {e}")
 
     # Make sure the model returned code only; if it wrapped in ``` remove fences
     fetch_code = strip_code_fences(fetch_code)
 
-    print('fetch:', fetch_code)
+    print('fetch code:', fetch_code)
     # 2) Execute fetch code
     manager = multiprocessing.Manager()
     queue = manager.Queue()
@@ -473,29 +490,40 @@ async def analyze(request: Request, text: str = Form(None)):
             print('ns:', ns)
         else:
             print(f"Generated code execution failed:\n{result['error']}")
+            ns = None
     else:
+        ns = None
+    print('queue, ns', (queue.empty()), ns)
+    if (ns == None):
         try:
             retrydf_prompt2 = f"""
                 Instructions: {retrydf_prompt}
 
                 Additional text file contents:
-                { {fname: text_files[fname] for fname in text_files} }
+                { {fname: text_files_sample[fname] for fname in text_files_sample}}
+
+                Image descriptions:
+                {image_descriptions}
 
             """
-            retry_code = call_llm(retrydf_prompt2, question_text)
             print('retrying')
+            retry_code = call_llm(retrydf_prompt2, question_text)
+            
             ns = execute_user_code(retry_code)
             print('ns:', ns)
         except Exception as e:
+            cleanup_files(saved_files)
             return AnalyzeResponse(success=False, answers=None, error=f"Execution of fetch code failed: {e}")
     # print('ns executed', ns)
 
     # Expect df variable
     if 'df' not in ns:
+        cleanup_files(saved_files)
         return AnalyzeResponse(success=False, answers=None, error="Generated code did not produce a variable named 'df'.")
 
     df = ns['df']
     if not isinstance(df, pd.DataFrame):
+        cleanup_files(saved_files)
         return AnalyzeResponse(success=False, answers=None, error="'df' is not a pandas DataFrame.")
 
     # 3) Create a sample representation of the dataframe to pass to LLM
@@ -513,31 +541,44 @@ async def analyze(request: Request, text: str = Form(None)):
     }
 
     sample_info_text = json.dumps(sample_info)
-    print('callimg llm for data reading')
+    print('callimg llm for data reading', sample_info_text)
     # 4) Ask LLM to generate answer code
     answer_prompt = answer_generation_prompt_template.format(
         question_text=question_text,
         sample_info=sample_info_text
     )
+
+    answer_prompt = f"""
+        Instructions: {answer_prompt}
+
+        Image descriptions:
+        {image_descriptions}
+
+    """
     try:
         answer_code = call_llm(answer_prompt, question_text)
     except Exception as e:
+        cleanup_files(saved_files)
         return AnalyzeResponse(success=False, answers=None, error=f"LLM answer-code generation failed: {e}")
 
     
-
+    print('llm code answered')
     answer_code = strip_code_fences(answer_code)
     print('executing the second code provied', answer_code)
     # 5) Execute answer code in environment where df is present
     try:
         ns2 = execute_user_code(answer_code, provided_env={'df': df})
     except Exception as e:
+        cleanup_files(saved_files)
         return AnalyzeResponse(success=False, answers=None, error=f"Execution of answer code failed: {e}")
 
+
     if 'answers' not in ns2:
+        cleanup_files(saved_files)
         return AnalyzeResponse(success=False, answers=None, error="Answer code did not set a variable named 'answers'.")
 
     answers = ns2['answers']
+    cleanup_files(saved_files)
 
     # Ensure answers is JSON-serializable; if not, attempt to coerce
     try:
@@ -597,5 +638,5 @@ def _json_serializer(obj):
 # ---------- Entrypoint for local testing ----------
 if __name__ == '__main__':
     import uvicorn
-    print("Starting Virtual Data Analyst API on http://0.0.0.0:8001")
-    uvicorn.run('virtual_data_analyst_api:app', host='0.0.0.0', port=8001, reload=False)
+    print("Starting Virtual Data Analyst API on http://0.0.0.0:8000")
+    uvicorn.run('virtual_data_analyst_api:app', host='0.0.0.0', port=8000, reload=False)
