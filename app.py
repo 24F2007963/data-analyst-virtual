@@ -29,7 +29,7 @@ Endpoints:
 
 """
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import tempfile
@@ -46,7 +46,9 @@ import sklearn
 import duckdb
 import multiprocessing
 import traceback
-from typing import Optional
+import aiohttp
+import base64
+from typing import Optional, List
 
 # ---------- Configuration ----------
 LLM_PROXY_URL = "https://aipipe.org/openrouter/v1/chat/completions"
@@ -269,6 +271,37 @@ def execute_user_code(code: str, provided_env: dict = None, timeout: int = 150) 
     result_ns.update(exec_locals)
     return result_ns
 
+def _exec_retry_worker(code, queue):
+    try:
+        result = execute_user_code(code)
+        queue.put({"success": True, "result": result})
+    except Exception:
+        queue.put({"success": False, "error": traceback.format_exc()})
+
+
+async def get_image_description(image_bytes: bytes) -> str:
+    # (Fill in your API endpoint, key, and request details here)
+    api_url = "https://vision.googleapis.com/v1/images:annotate?key=AIzaSyC4iKaY-zwLslbeFJ8owyVHfz7eawZgXII"
+
+    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+    print(image_base64)
+
+    request_body = {
+        "requests": [{
+            "image": {"content": image_base64},
+            "features": [{"type": "LABEL_DETECTION", "maxResults": 5}]
+        }]
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(api_url, json=request_body) as resp:
+            resp_json = await resp.json()
+            print(resp.text)
+            # Extract a useful textual description from response, e.g. labels
+            labels = resp_json.get('responses', [{}])[0].get('labelAnnotations', [])
+            description = ", ".join([label['description'] for label in labels])
+            return description
+
 
 # ---------- Prompt templates ----------
 
@@ -294,6 +327,7 @@ Guidelines (strict):
   concatenate them into one df and reset the index.
 - No additional code to solve the questions should be there in the python code. On running the code, we should only get a dataframe.
 - Do NOT include code for data processing, querries and graph plotting or any other process that not related to getting the data as dataframe
+
 Respond with ONLY the Python code.
 """)
 
@@ -321,7 +355,7 @@ Respond with ONLY the Python code.
 
 retrydf_prompt = """
     You are a data extraction assistant that provides data based on context and questions.
-    The user will give you a question. 
+    The user will give you a question and context. Write python code providing valid data from the souce specified.  
     You must return ONLY valid Python code that:
     1. Imports pandas
     2. Creates a pandas DataFrame named df
@@ -334,29 +368,81 @@ retrydf_prompt = """
 # ---------- API Endpoint ----------
 
 @app.post('/api', response_model=AnalyzeResponse)
-async def analyze(file: UploadFile = File(...), text: str = Form(None)):
-    """Main endpoint. Accepts either an uploaded question.txt or raw text form field.
+async def analyze(request: Request, text: str = Form(None)):
+    attachments = {}
+    text_files = {}
+    question_text = None
+    image_descriptions = {}
 
-    Steps:
-      1. Get question_text
-      2. Ask LLM to generate data-fetch code
-      3. Execute to get df
-      4. Send df sample + question back to LLM to generate answer code
-      5. Execute answer code and return answers
-    """
-    if file is None and not text:
-        raise HTTPException(status_code=400, detail="Provide either a file or text form field")
+    form = await request.form()
+    print(form)
+    for form_key, form_value in form.multi_items():
+        print('file present')
+        print('form key',form_value)
+        print('instance', isinstance(form_value, UploadFile))
+        if hasattr(form_value, "filename"):
+            print('files present', form_value)
+            content = await form_value.read()
+            fname = form_value.filename.lower()
+            print('content: ', fname)
+            try:
+                text_content = content.decode("utf-8")
+                if form_value.filename.lower().endswith(".txt"):
+                    question_text = text_content
+                else:
+                    text_files[form_value.filename] = text_content
+            except UnicodeDecodeError:
+                attachments[form_value.filename] = content
 
-    if file is not None:
-        content = await file.read()
-        question_text = content.decode('utf-8', errors='ignore')
-    else:
-        question_text = text
+                if fname.endswith((".png", ".jpg", ".jpeg")):
+                    description = await get_image_description(content)
+                    image_descriptions[form_value.filename] = description
+
+    print("question_text:", question_text)
+    print("text_files:", list(text_files.keys()))
+    print("attachments:", list(attachments.keys()))
+    print(image_descriptions)
+    # for f in files:
+    #     print(f.filename)
+    #     content = await f.read()
+    #     # Detect text vs binary
+    #     try:
+    #         text_content = content.decode("utf-8")
+    #         if f.filename.lower().endswith(".txt"):
+    #             question_text = text_content
+    #         else:
+    #             text_files[f.filename] = text_content
+    #     except UnicodeDecodeError:
+    #         # Store binary files as bytes
+    #         attachments[f.filename] = content 
+
+    # if file is None and not text:
+    #     raise HTTPException(status_code=400, detail="Provide either a file or text form field")
+
+    # if file is not None:
+    #     content = await file.read()
+    #     question_text = content.decode('utf-8', errors='ignore')
+    # else:
+    #     question_text = text
+
+    
     
 
     # 1) Ask LLM for data-fetch code
     fetch_prompt = data_fetch_prompt_template.format(question_text=question_text)
-    
+    fetch_prompt = f"""
+        Instructions: {fetch_prompt}
+
+        Additional text file contents:
+        { {fname: text_files[fname] for fname in text_files} }
+
+
+        Image descriptions:
+        {image_descriptions}
+
+    """
+    print('fetching: ' , fetch_prompt)
+    print('question:',question_text)
     try:
         fetch_code = call_llm(fetch_prompt, question_text)
     except Exception as e:
@@ -367,21 +453,43 @@ async def analyze(file: UploadFile = File(...), text: str = Form(None)):
 
     print('fetch:', fetch_code)
     # 2) Execute fetch code
-    try:
-        retry_code = call_llm(retrydf_prompt, question_text)
-        print('retrying')
-        ns = execute_user_code(retry_code)
-        print('ns:', ns)
-        # ns = execute_user_code(fetch_code)
-    except Exception as e:
+    manager = multiprocessing.Manager()
+    queue = manager.Queue()
+    process = multiprocessing.Process(target=_exec_retry_worker, args=(fetch_code, queue))
+    process.start()
+    process.join(150)  # 150-second timeout
+
+    if process.is_alive():
+        process.terminate()
+        process.join(2)  # give it 2 seconds to clean up
+        if process.is_alive():
+            process.kill()  # force kill
+        print("took too long")
+
+    if not queue.empty():
+        result = queue.get()
+        if result["success"]:
+            ns = result["result"]
+            print('ns:', ns)
+        else:
+            print(f"Generated code execution failed:\n{result['error']}")
+    else:
         try:
-            retry_code = call_llm(retrydf_prompt, question_text)
+            retrydf_prompt2 = f"""
+                Instructions: {retrydf_prompt}
+
+                Additional text file contents:
+                { {fname: text_files[fname] for fname in text_files} }
+
+            """
+            retry_code = call_llm(retrydf_prompt2, question_text)
             print('retrying')
             ns = execute_user_code(retry_code)
             print('ns:', ns)
-        except Exception as e2:
+        except Exception as e:
             return AnalyzeResponse(success=False, answers=None, error=f"Execution of fetch code failed: {e}")
     # print('ns executed', ns)
+
     # Expect df variable
     if 'df' not in ns:
         return AnalyzeResponse(success=False, answers=None, error="Generated code did not produce a variable named 'df'.")
