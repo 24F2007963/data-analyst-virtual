@@ -54,7 +54,7 @@ from typing import Optional, List
 
 # ---------- Configuration ----------
 LLM_PROXY_URL = "https://aipipe.org/openrouter/v1/chat/completions"
-API_PROXY_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6InNtcml0aS50dXJhbkBnbWFpbC5jb20ifQ.9pqId92evbHHNgH8I5FWqTHYqdMSmo-bM2TnLi2XEgg"
+API_PROXY_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6InNtcml0aWNob3VkaGFyeTI0MTFAZ21haWwuY29tIn0.t7Ry2KASjHeupc4yhIgTDw3Vpl9nnLIb9EVQcmhhCtg"
 # Set MODEL and any other settings your proxy accepts
 LLM_MODEL = "gpt-4o-mini"  # change if needed
 LLM_MAX_TOKENS = 1500
@@ -395,10 +395,65 @@ retrydf_prompt = """
     Do not output markdown formatting.
     """
 
+answer_prompt_failed_template = textwrap.dedent("""
+You are a helpful assistant that re-writes Python code to compute answers from a
+pandas DataFrame named `df` considering the error produced when executing the previously generated code. The runtime will provide `pd` and `duckdb` and has
+already loaded a dataframe `df` (containing a sample of the user's data or the
+entire dataset). The original user questions and any additional context are below.
+The code generated previously and the error that was generated while executing it is also provided below.
+
+Write Python code that computes a variable called `answers` (AS a dict ONLY) that contains the answers to the questions.
+Guidelines:
+- Use only pandas and duckdb for data processing.
+- you can use sklearn for data processing if needed.
+- STRICTLY Use pandas string replacement with a regex (.str.replace(r'[^\d.]', '', regex=True), that strips everything except digits and decimal points, and then convert to numeric to avoid errors.
+- When filtering and finding a max/min row (e.g., `idxmax`), **filter first, then calculate**:
+    - Store filtered results in a variable before applying `idxmax` or `iloc`.
+    - Check `if not df.empty:` before indexing to avoid runtime errors.
+    - Do not reuse an index from one DataFrame on another.
+- Avoid chained indexing pitfalls — always work on a variable holding the filtered DataFrame.
+- The code should not print; it should set `answers` and then finish.
+- If numerical outputs are returned, ensure types are simple (int, float, str).
+- Respond with ONLY the Python code.
+
+Questions / Context:
+""" + "{question_text}" + "\n\n" + "Data sample info:\n" + "{sample_info}" + "\n" + """
+
+Previous code:
+""" + "{prev_code}" + "\n\n" + "Error:\n" + "{error_prev}" + "\n" + """
+
+Respond with ONLY the Python code.
+""")
+
+answer_final = """
+You are a data analysis assistant.  
+You will be given a question that needs to be answered using available datasets and transformations.  
+Your job is to return ONLY the final answer in **strict JSON format** as described below.  
+Do NOT include explanations, reasoning, or extra text.
+
+Expected JSON format:
+{
+  "answer": 
+    {
+      "question1": "answer1",
+      "question2": "answer2",
+      ....
+    }
+}
+
+Rules (Strict):
+- Always respond with valid JSON.
+- Return only a JSON object with the field "answers", containing the answer text and links array.
+- The "answer" must be directly relevant and concise.
+- Do NOT include markdown formatting or code blocks.
+- If no answer is possible, return: {"answer": "No data available", "links": []}.
+"""
+
+
 
 # ---------- API Endpoint ----------
 
-@app.post('/api', response_model=AnalyzeResponse)
+@app.post('/api')
 async def analyze(request: Request, text: str = Form(None)):
     print('api called')
     attachments = {}
@@ -463,7 +518,7 @@ async def analyze(request: Request, text: str = Form(None)):
         fetch_code = call_llm(fetch_prompt, question_text)
     except Exception as e:
         cleanup_files(saved_files)
-        return AnalyzeResponse(success=False, answers=None, error=f"LLM data-fetch failed: {e}")
+        return (f"LLM data-fetch failed: {e}")
 
     # Make sure the model returned code only; if it wrapped in ``` remove fences
     fetch_code = strip_code_fences(fetch_code)
@@ -493,6 +548,7 @@ async def analyze(request: Request, text: str = Form(None)):
             ns = None
     else:
         ns = None
+
     print('queue, ns', (queue.empty()), ns)
     if (ns == None):
         try:
@@ -513,18 +569,18 @@ async def analyze(request: Request, text: str = Form(None)):
             print('ns:', ns)
         except Exception as e:
             cleanup_files(saved_files)
-            return AnalyzeResponse(success=False, answers=None, error=f"Execution of fetch code failed: {e}")
+            return (f"Execution of fetch code failed: {e}")
     # print('ns executed', ns)
 
     # Expect df variable
     if 'df' not in ns:
         cleanup_files(saved_files)
-        return AnalyzeResponse(success=False, answers=None, error="Generated code did not produce a variable named 'df'.")
+        return ("Generated code did not produce a variable named 'df'.")
 
     df = ns['df']
     if not isinstance(df, pd.DataFrame):
         cleanup_files(saved_files)
-        return AnalyzeResponse(success=False, answers=None, error="'df' is not a pandas DataFrame.")
+        return ("'df' is not a pandas DataFrame.")
 
     # 3) Create a sample representation of the dataframe to pass to LLM
     SAMPLE_ROWS = 100
@@ -556,26 +612,60 @@ async def analyze(request: Request, text: str = Form(None)):
 
     """
     try:
-        answer_code = call_llm(answer_prompt, question_text)
+        answer_code = call_llm(answer_prompt, '')
     except Exception as e:
         cleanup_files(saved_files)
-        return AnalyzeResponse(success=False, answers=None, error=f"LLM answer-code generation failed: {e}")
+        return ("LLM answer-code generation failed: {e}")
 
     
     print('llm code answered')
     answer_code = strip_code_fences(answer_code)
     print('executing the second code provied', answer_code)
+    cannotexecute = False
     # 5) Execute answer code in environment where df is present
     try:
         ns2 = execute_user_code(answer_code, provided_env={'df': df})
     except Exception as e:
-        cleanup_files(saved_files)
-        return AnalyzeResponse(success=False, answers=None, error=f"Execution of answer code failed: {e}")
+        cannotexecute = True
+        error = str(e)
+
+    
+
+    if cannotexecute:
+        answer_prompt_failed = answer_prompt_failed_template.format(
+            question_text=question_text,
+            sample_info=sample_info_text,
+            prev_code=answer_code,
+            error_prev=error 
+        )
+        try:
+            answer_code = call_llm(answer_prompt_failed, '')
+        except Exception as e:
+            cleanup_files(saved_files)
+            return ("LLM answer-code regeneration failed: {e}")
+
+        answer_code = strip_code_fences(answer_code)
+        try:
+            ns2 = execute_user_code(answer_code, provided_env={'df': df})
+            cannotexecute = False
+        except Exception as e:
+            cannotexecute = True
+   
+
+    if cannotexecute:
+        try:
+            ns2 = call_llm(answer_final, question_text)
+        except Exception as e:
+            cleanup_files(saved_files)
+            return ("LLM answer generation failed: {e}")
+
+
+    
 
 
     if 'answers' not in ns2:
         cleanup_files(saved_files)
-        return AnalyzeResponse(success=False, answers=None, error="Answer code did not set a variable named 'answers'.")
+        return ("Answer code did not set a variable named 'answers'.")
 
     answers = ns2['answers']
     cleanup_files(saved_files)
@@ -584,9 +674,9 @@ async def analyze(request: Request, text: str = Form(None)):
     try:
         json_compatible = json.loads(json.dumps(answers, default=_json_serializer))
     except Exception as e:
-        return AnalyzeResponse(success=False, answers=None, error=f"Answers not JSON-serializable: {e}")
+        return (f"Answers not JSON-serializable: {e}")
 
-    return AnalyzeResponse(success=True, answers=json_compatible)
+    return (json_compatible)
 
     
 
