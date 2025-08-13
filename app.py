@@ -32,7 +32,8 @@ Endpoints:
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from google.cloud import vision
+from google import genai
+from google.genai import types
 import tempfile
 import os
 import io
@@ -55,6 +56,7 @@ from typing import Optional, List
 # ---------- Configuration ----------
 LLM_PROXY_URL = "https://aipipe.org/openrouter/v1/chat/completions"
 API_PROXY_KEY = os.getenv("API_KEY") 
+GEMINI_API_KEY= os.getenv("GEMINI_API_KEY")
 # Set MODEL and any other settings your proxy accepts
 LLM_MODEL = "gpt-4o-mini"  # change if needed
 LLM_MAX_TOKENS = 1500
@@ -294,22 +296,20 @@ def _exec_retry_worker(code, queue):
 
 
 async def get_image_description(image_bytes: bytes) -> str:
-    client = vision.ImageAnnotatorClient()
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=[
+            types.Part.from_bytes(
+                data=image_bytes,
+                mime_type='image/jpeg',
+            ),
+            'Describe this image.'
+        ]
+    )
 
-    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-    image = vision.Image(content=image_base64)
+    return(response.text)
 
-    response = client.text_detection(image=image)
-
-    if response.error.message:
-        return response.error.message
-
-    texts = response.text_annotations
-    if texts:
-        extracted_text = texts[0].description  # Full OCR text
-        return {"text": extracted_text}
-    else:
-        return {"text": ""}
 
 def get_csv_sample(csv_text, n=5):
     try:

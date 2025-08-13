@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+pandas
+duckdb
+pyarrow
+numpy
+scikit-learn
+statsmodels
+matplotlib
+boto3
+s3fs
+openai
+python-multipart
+google-generativeai
+aiohttp
+genai
+requests
