@@ -459,6 +459,7 @@ Rules (Strict):
 @app.post('/api')
 async def analyze(request: Request, text: str = Form(None)):
     print(API_PROXY_KEY)
+    print(os.environ.get("API_KEY"))
     print('api called')
     attachments = {}
     text_files = {}
