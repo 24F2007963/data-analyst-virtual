@@ -54,7 +54,7 @@ from typing import Optional, List
 
 # ---------- Configuration ----------
 LLM_PROXY_URL = "https://aipipe.org/openrouter/v1/chat/completions"
-API_PROXY_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6InNtcml0aWNob3VkaGFyeTI0MTFAZ21haWwuY29tIn0.t7Ry2KASjHeupc4yhIgTDw3Vpl9nnLIb9EVQcmhhCtg"
+API_PROXY_KEY = os.getenv("API_KEY") 
 # Set MODEL and any other settings your proxy accepts
 LLM_MODEL = "gpt-4o-mini"  # change if needed
 LLM_MAX_TOKENS = 1500
@@ -354,6 +354,7 @@ Guidelines (strict):
   concatenate them into one df and reset the index.
 - No additional code to solve the questions should be there in the python code. On running the code, we should only get a dataframe.
 - Do NOT include code for data processing, querries and graph plotting or any other process that not related to getting the data as dataframe
+- Provide the correct response ONLY
 
 Respond with ONLY the Python code.
 """)
