@@ -61,6 +61,8 @@ GEMINI_API_KEY= os.getenv("GEMINI_API_KEY")
 LLM_MODEL = "gpt-4o-mini"  # change if needed
 LLM_MAX_TOKENS = 1500
 
+port = int(os.environ.get("PORT", 8000)) 
+
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "tds-data-analyst-a18de7bbb408.json"
 
 # Allowed modules and names for execution environment
@@ -730,4 +732,4 @@ def _json_serializer(obj):
 if __name__ == '__main__':
     import uvicorn
     print("Starting Virtual Data Analyst API on http://0.0.0.0:8000")
-    uvicorn.run('virtual_data_analyst_api:app', host='0.0.0.0', port=8000, reload=False)
+    uvicorn.run('virtual_data_analyst_api:app', host='0.0.0.0', port=port, reload=False)
