@@ -732,4 +732,4 @@ def _json_serializer(obj):
 if __name__ == '__main__':
     import uvicorn
     print("Starting Virtual Data Analyst API on http://0.0.0.0:8000")
-    uvicorn.run('virtual_data_analyst_api:app', host='0.0.0.0', port=port, reload=False)
+    uvicorn.run('app:app', host='0.0.0.0', port=port, reload=False)
