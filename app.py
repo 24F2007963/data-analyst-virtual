@@ -719,12 +719,16 @@ async def analyze(request: Request, text: str = Form(None)):
             return ("LLM answer generation failed: {e}")
 
     print('ns2:', ns2)
+
     
 
 
     if 'answers' not in ns2:
-        cleanup_files(saved_files)
-        return ("Answer code did not set a variable named 'answers'.")
+        try:
+            ns2 = json.loads(ns2)
+            if 'answers' not in ns2:
+                return ("Answer code did not set a variable named 'answers'.")
+        
 
     answers = ns2['answers']
     cleanup_files(saved_files)
