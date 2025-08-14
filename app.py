@@ -367,7 +367,7 @@ You are a helpful assistant that writes Python code to compute answers from a
 pandas DataFrame named `df`. The runtime will provide `pd` and `duckdb` and has
 already loaded a dataframe `df` (containing a sample of the user's data or the
 entire dataset). The original user questions and any additional context are below.
-Do not import any other libraries that needs to be installed before importing. Here are the available libraries imported already:
+Here are the available libraries imported already:
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -405,6 +405,7 @@ Guidelines:
 - Avoid chained indexing pitfalls — always work on a variable holding the filtered DataFrame.
 - The code should not print; it should set `answers` and then finish.
 - If numerical outputs are returned, ensure types are simple (int, float, str).
+- STRICTLY Do NOT import any other libraries other than the ones mentioned above.
 - Respond with ONLY the Python code.
 
 Questions / Context:
@@ -430,6 +431,31 @@ pandas DataFrame named `df` considering the error produced when executing the pr
 already loaded a dataframe `df` (containing a sample of the user's data or the
 entire dataset). The original user questions and any additional context are below.
 The code generated previously and the error that was generated while executing it is also provided below.
+Here are the available libraries imported already:
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from google import genai
+from google.genai import types
+import tempfile
+import os
+import io
+import json
+import ast
+import textwrap
+import uuid
+import requests
+import pandas as pd
+import numpy as np
+import sklearn
+import duckdb
+import multiprocessing
+import traceback
+import aiohttp
+import base64
+import pickle
+from typing import Optional, List
+
 
 Write Python code that computes a variable called `answers` (AS a dict ONLY) that contains the answers to the questions.
 Guidelines:
@@ -443,6 +469,7 @@ Guidelines:
 - Avoid chained indexing pitfalls — always work on a variable holding the filtered DataFrame.
 - The code should not print; it should set `answers` and then finish.
 - If numerical outputs are returned, ensure types are simple (int, float, str).
+- STRICTLY Do NOT import any other libraries other than the ones mentioned above.
 - Respond with ONLY the Python code.
 
 Questions / Context:
@@ -475,7 +502,6 @@ Rules (Strict):
 - Return only a JSON object with the field "answers", containing the answer text and links array.
 - The "answer" must be directly relevant and concise.
 - Do NOT include markdown formatting or code blocks.
-- If no answer is possible, return: {"answer": "No data available", "links": []}.
 """
 
 
