@@ -725,7 +725,9 @@ async def analyze(request: Request, text: str = Form(None)):
 
     if 'answers' not in ns2:
         try:
-            ns2 = json.loads(ns2)
+            ns2_json = json.loads(ns2)
+            print(ns2['answers'])
+            ns2 = ns2_json
             if 'answers' not in ns2:
                 return ("Answer code did not set a variable named 'answers'.")
         except:
