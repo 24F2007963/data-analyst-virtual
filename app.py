@@ -460,6 +460,8 @@ Rules (Strict):
 async def analyze(request: Request, text: str = Form(None)):
     print(API_PROXY_KEY)
     print(os.environ.get("API_KEY"))
+    print(os.getenv("API_KEY"))
+    print(os.environ.get("PORT"))
     print('api called')
     attachments = {}
     text_files = {}
