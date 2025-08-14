@@ -490,7 +490,7 @@ async def analyze(request: Request, text: str = Form(None)):
                     text_files[form_key] = text_content
                     with open(form_key, "wb") as f:
                         f.write(content)
-                        saved_files.append(form_key)
+                        # saved_files.append(form_key)
             except UnicodeDecodeError:
                 attachments[form_value.filename] = content
 
@@ -530,6 +530,7 @@ async def analyze(request: Request, text: str = Form(None)):
 
     # Make sure the model returned code only; if it wrapped in ``` remove fences
     fetch_code = strip_code_fences(fetch_code)
+
 
     print('fetch code:', fetch_code)
     # 2) Execute fetch code
@@ -680,7 +681,9 @@ async def analyze(request: Request, text: str = Form(None)):
 
     # Ensure answers is JSON-serializable; if not, attempt to coerce
     try:
+        print('answers: ', answers)
         json_compatible = json.loads(json.dumps(answers, default=_json_serializer))
+        print('json:', json_compatible)
     except Exception as e:
         return (f"Answers not JSON-serializable: {e}")
 
