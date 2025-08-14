@@ -270,10 +270,11 @@ def execute_user_code(code: str, provided_env: dict = None, timeout: int = 150) 
         compiled = compile(code, '<user-code>', 'exec')
         exec(compiled, exec_globals, exec_locals)
     except Exception as e:
+        print(f"Execution error: {e}")
         raise RuntimeError(f"Execution error: {e}")
 
     
-
+    print('execution successfull')
     # Merge exec_globals + exec_locals for convenience
     result_ns = dict(exec_globals)
     result_ns.update(exec_locals)
