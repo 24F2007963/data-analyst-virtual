@@ -693,7 +693,7 @@ async def analyze(request: Request, text: str = Form(None)):
             cleanup_files(saved_files)
             return ("LLM answer generation failed: {e}")
 
-
+    print('ns2:', ns2)
     
 
 
