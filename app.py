@@ -688,8 +688,7 @@ async def analyze(request: Request, text: str = Form(None)):
     except Exception as e:
         cannotexecute = True
         error = str(e)
-
-    print(error)
+        print(error)
 
     if cannotexecute:
         answer_prompt_failed = answer_prompt_failed_template.format(
