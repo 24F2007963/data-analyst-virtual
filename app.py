@@ -489,7 +489,7 @@ Do NOT include explanations, reasoning, or extra text.
 
 Expected JSON format:
 {
-  "answer": 
+  "answers": 
     {
       "question1": "answer1",
       "question2": "answer2",
