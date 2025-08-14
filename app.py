@@ -367,6 +367,31 @@ You are a helpful assistant that writes Python code to compute answers from a
 pandas DataFrame named `df`. The runtime will provide `pd` and `duckdb` and has
 already loaded a dataframe `df` (containing a sample of the user's data or the
 entire dataset). The original user questions and any additional context are below.
+Do not import any other libraries that needs to be installed before importing. Here are the available libraries imported already:
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from google import genai
+from google.genai import types
+import tempfile
+import os
+import io
+import json
+import ast
+import textwrap
+import uuid
+import requests
+import pandas as pd
+import numpy as np
+import sklearn
+import duckdb
+import multiprocessing
+import traceback
+import aiohttp
+import base64
+import pickle
+from typing import Optional, List
+
 
 Write Python code that computes a variable called `answers` (AS a dict ONLY) that contains the answers to the questions.
 Guidelines:
@@ -638,7 +663,7 @@ async def analyze(request: Request, text: str = Form(None)):
         cannotexecute = True
         error = str(e)
 
-    
+    print(error)
 
     if cannotexecute:
         answer_prompt_failed = answer_prompt_failed_template.format(
