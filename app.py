@@ -485,7 +485,7 @@ answer_final = """
 You are a data analysis assistant.  
 You will be given a question that needs to be answered using available datasets and transformations.  
 Your job is to return ONLY the final answer in **strict JSON format** as described below.  
-Do NOT include explanations, reasoning, or extra text.
+Do NOT include explanations, reasoning, or extra text. 
 
 Expected JSON format:
 {
@@ -718,7 +718,7 @@ async def analyze(request: Request, text: str = Form(None)):
             ns2 = json.loads('ans:', answer_code)
         except Exception as e:
             cleanup_files(saved_files)
-            return ("LLM answer generation failed: {e}")
+            return (f"LLM answer generation failed: {e}")
 
     print('ns2:', ns2)
 
