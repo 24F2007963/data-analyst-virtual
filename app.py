@@ -485,7 +485,7 @@ answer_final = """
 You are a data analysis assistant.  
 You will be given a question that needs to be answered using available datasets and transformations.  
 Your job is to return ONLY the final answer in **strict JSON format** as described below.  
-Do NOT include explanations, reasoning, or extra text. For images and graphs as answers, provide truncated string ONLY.
+Do NOT include explanations, reasoning, or extra text.
 
 Expected JSON format:
 {
@@ -501,6 +501,7 @@ Rules (Strict):
 - Always respond with valid JSON.
 - Return only a JSON object with the field "answers", containing the answer text and links array.
 - The "answer" must be directly relevant and concise.
+- For answers including images and graphs as answers, provide truncated string ONLY.
 - Do NOT include markdown formatting or code blocks.
 """
 
