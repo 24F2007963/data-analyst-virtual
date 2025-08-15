@@ -713,7 +713,9 @@ async def analyze(request: Request, text: str = Form(None)):
 
     if cannotexecute:
         try:
-            ns2 = call_llm(answer_final, question_text)
+            answer_code = call_llm(answer_final, question_text)
+            print(answer_code)
+            ns2 = json.loads('ans:', answer_code)
         except Exception as e:
             cleanup_files(saved_files)
             return ("LLM answer generation failed: {e}")
@@ -724,16 +726,16 @@ async def analyze(request: Request, text: str = Form(None)):
 
 
     if 'answers' not in ns2:
-        print('answer not in ns2')
-        try:
-            print('answer not in ns2')
-            ns2_json = json.loads(ns2)
-            print('json:',ns2_json)
-            ns2 = ns2_json
-            if 'answers' not in ns2:
-                return ("Answer code did not set a variable named 'answers'.")
-        except:
-            return (f"Answers not JSON-serializable: {e}")
+        # print('answer not in ns2')
+        # try:
+        #     print('answer not in ns2')
+        #     ns2_json = json.loads(ns2)
+        #     print('json:',ns2_json)
+        #     ns2 = ns2_json
+        #     if 'answers' not in ns2:
+        #         return ("Answer code did not set a variable named 'answers'.")
+        # except:
+        return (f"Answers not JSON-serializable: {e}")
         
 
     answers = ns2['answers']
