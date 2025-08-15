@@ -726,15 +726,6 @@ async def analyze(request: Request, text: str = Form(None)):
 
 
     if 'answers' not in ns2:
-        # print('answer not in ns2')
-        # try:
-        #     print('answer not in ns2')
-        #     ns2_json = json.loads(ns2)
-        #     print('json:',ns2_json)
-        #     ns2 = ns2_json
-        #     if 'answers' not in ns2:
-        #         return ("Answer code did not set a variable named 'answers'.")
-        # except:
         return (f"Answers not JSON-serializable: {e}")
         
 
