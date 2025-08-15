@@ -155,11 +155,11 @@ def basic_safety_check(code: str) -> None:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 name = alias.name.split('.')[0]
-                if name not in ('pandas', 'duckdb', 'io', 'json', 'matplotlib', 'seaborn', 'base64', 'numpy', 'sklearn'):
+                if name not in ('pandas', 'duckdb', 'io', 'json', 'matplotlib', 'seaborn', 'base64', 'numpy', 'sklearn', 'networkx'):
                     raise ValueError(f"Import of module '{name}' is not allowed")
         if isinstance(node, ast.ImportFrom):
             mod = (node.module or '').split('.')[0]
-            if mod not in ('pandas', 'duckdb', 'io', 'json', 'matplotlib', 'seaborn', 'base64', 'numpy', 'sklearn'):
+            if mod not in ('pandas', 'duckdb', 'io', 'json', 'matplotlib', 'seaborn', 'base64', 'numpy', 'sklearn', 'networkx'):
                 raise ValueError(f"Import from '{mod}' is not allowed")
         # Disallow dangerous attribute access
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
