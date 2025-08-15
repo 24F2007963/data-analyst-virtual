@@ -501,7 +501,7 @@ Rules (Strict):
 - Always respond with valid JSON.
 - Return only a JSON object with the field "answers", containing the answer text and links array.
 - The "answer" must be directly relevant and concise.
-- For answers including images and graphs as answers, provide a base64 image only.
+- For answers including images and graphs as answers, provide a base64 string that os TRUNCATED only.
 - Do NOT include markdown formatting or code blocks.
 """
 
