@@ -715,7 +715,7 @@ async def analyze(request: Request, text: str = Form(None)):
         try:
             answer_code = call_llm(answer_final, question_text)
             print(answer_code)
-            ns2 = json.loads('ans:', answer_code)
+            ns2 = json.loads(answer_code)
         except Exception as e:
             cleanup_files(saved_files)
             return (f"LLM answer generation failed: {e}")
